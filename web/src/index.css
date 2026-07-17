@@ -1,11 +1,16 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Disruptivo Wallet — tema oscuro "brutal" (fondo negro + oro)
+   Paleta: negro casi puro + acento dorado (#d9b45b UI, #ab8526
+   barras, validado con la skill dataviz contra la superficie).
+   ============================================================ */
 @theme {
-  --color-bg: #0f1117;
-  --color-card: #181b23;
-  --color-card2: #1e222c;
-  --color-border: #2a2e3a;
-  --color-ink: #e8e6e0;
+  --color-bg: #0a0a0c;
+  --color-card: #131319;
+  --color-card2: #1a1a22;
+  --color-border: #26262f;
+  --color-ink: #f0eee8;
   --color-ink2: #a8adb8;
   --color-mut: #6b7280;
   --color-gold: #d9b45b;
@@ -15,10 +20,83 @@
   --color-bad: #f87171;
 }
 
+html { color-scheme: dark; }
 body {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--color-bg);
   color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-::selection { background: rgba(217, 180, 91, 0.3); }
+/* ---------- Fondo animado: glows dorados + rejilla de píxeles ---------- */
+.app-bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.app-bg::before {
+  content: ''; position: absolute; inset: -60%;
+  background-image:
+    linear-gradient(rgba(217, 180, 91, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(217, 180, 91, 0.045) 1px, transparent 1px);
+  background-size: 38px 38px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 0%, transparent 72%);
+  animation: gridDrift 36s linear infinite;
+}
+.app-bg::after {
+  content: ''; position: absolute; inset: 0;
+  background:
+    radial-gradient(620px circle at 12% -8%, rgba(217, 180, 91, 0.11), transparent 60%),
+    radial-gradient(520px circle at 100% 8%, rgba(171, 133, 38, 0.09), transparent 55%),
+    radial-gradient(700px circle at 60% 108%, rgba(217, 180, 91, 0.05), transparent 60%);
+  animation: glowPulse 9s ease-in-out infinite alternate;
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes gridDrift { from { transform: translateY(0); } to { transform: translateY(38px); } }
+@keyframes glowPulse { from { opacity: 0.65; } to { opacity: 1; } }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes barGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes glowRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 180, 91, 0.35); }
+  50% { box-shadow: 0 0 26px 3px rgba(217, 180, 91, 0.28); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Utilidades de animación ---------- */
+.animate-in { animation: fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-fade { animation: fadeIn 0.6s ease both; }
+
+/* tarjetas: borde + glow dorado al pasar el ratón */
+.card-hover { transition: border-color 0.2s ease, box-shadow 0.25s ease, transform 0.2s ease; }
+.card-hover:hover { border-color: rgba(217, 180, 91, 0.32); box-shadow: 0 10px 34px -16px rgba(217, 180, 91, 0.4); }
+
+/* tiles/elementos que se elevan al hover */
+.lift { transition: transform 0.2s ease, box-shadow 0.25s ease, border-color 0.2s ease; }
+.lift:hover { transform: translateY(-3px); border-color: rgba(217, 180, 91, 0.4); box-shadow: 0 14px 40px -18px rgba(217, 180, 91, 0.5); }
+
+/* glow suave estático (logo, login) */
+.glow-gold { box-shadow: 0 0 30px -6px rgba(217, 180, 91, 0.5); animation: glowRing 4.5s ease-in-out infinite; }
+
+/* texto con degradado dorado */
+.text-gradient-gold {
+  background: linear-gradient(100deg, #f3d99b 0%, #d9b45b 45%, #ab8526 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+
+/* barras del gráfico crecen desde la base */
+.bar { transform-box: fill-box; transform-origin: bottom; animation: barGrow 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.spin { animation: spin 0.8s linear infinite; }
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #26262f; border-radius: 8px; border: 2px solid var(--color-bg); }
+::-webkit-scrollbar-thumb:hover { background: #3a3a46; }
+
+::selection { background: rgba(217, 180, 91, 0.32); }
+
+/* ---------- Accesibilidad: respeta "reducir movimiento" ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 
 export const Card = ({ children, className = '' }) => (
-  <div className={`bg-card border border-border rounded-2xl p-5 ${className}`}>{children}</div>
+  <div className={`bg-card border border-border rounded-2xl p-5 card-hover ${className}`}>{children}</div>
 )
 
 export const Button = ({ children, variant = 'primary', className = '', ...props }) => {

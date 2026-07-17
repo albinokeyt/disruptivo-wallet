@@ -114,11 +114,18 @@ export async function reconcileCharge(row) {
   const hit = Array.isArray(list) ? list.find((c) => c && c.transactionType !== 'refund') : null
   if (!hit) return { absent: true }
   const ghlId = hit.chargeId || hit._id || hit.id || null
+  // Escribimos el importe/unidades REALES que reporta GHL: si un reintento reescribió la fila con otro
+  // importe, el ledger queda fiel a lo que GHL cobró de verdad (no al último input reenviado).
+  const amt = numOr(hit.amountCharged)
+  const ppu = numOr(hit.pricePerUnit)
+  const un = numOr(hit.units)
   // nunca pisar un estado final (p. ej. 'refunded'); solo promocionar estados no confirmados
   const { rows: [updated] } = await q(
-    `UPDATE charges SET status='created', ghl_charge_id=COALESCE($1, ghl_charge_id), error=NULL, updated_at=now()
+    `UPDATE charges SET status='created', ghl_charge_id=COALESCE($1, ghl_charge_id),
+       amount=COALESCE($3, amount), price_per_unit=COALESCE($4, price_per_unit), units=COALESCE($5, units),
+       error=NULL, updated_at=now()
      WHERE id=$2 AND status IN ('pending','unknown','failed') RETURNING *`,
-    [ghlId, row.id]
+    [ghlId, row.id, amt, ppu, un]
   )
   return updated ? { verified: updated } : { verified: row }
 }
@@ -152,10 +159,15 @@ export async function executeCharge(rowId, input, log) {
   try {
     res = await ghl.createCharge(input.conn.id, ghlBody)
   } catch (err) {
-    // 4xx de GHL = rechazo concluyente (no cobró). Timeout/red/5xx = AMBIGUO: pudo cobrar → 'unknown', se reconcilia al reintentar.
-    const conclusive = err.status >= 400 && err.status < 500
+    // Un 409 (o "duplicate eventId") NO es un rechazo: el cargo YA existe en GHL de un intento previo
+    // = cobro REAL. Lo tratamos como AMBIGUO ('unknown') para que la reconciliación lo promueva a
+    // 'created', nunca 'failed' (marcarlo failed lo dejaría invisible y provocaría re-cobro al reintentar).
+    const dupBlob = `${err.message} ${err.data ? JSON.stringify(err.data) : ''}`
+    const duplicate = err.status === 409 || /duplicat|already\s*ex[ií]st/i.test(dupBlob)
+    // Otros 4xx (400/422/403…) = rechazo concluyente (no cobró). Timeout/red/5xx/duplicado = AMBIGUO → 'unknown'.
+    const conclusive = err.status >= 400 && err.status < 500 && !duplicate
     const newStatus = conclusive ? 'failed' : 'unknown'
-    log?.error({ err: err.message, rowId, status: newStatus }, 'cargo GHL falló')
+    log?.error({ err: err.message, rowId, status: newStatus, duplicate }, 'cargo GHL falló')
     const { rows: [updated] } = await q(
       `UPDATE charges SET status=$1, error=$2, updated_at=now() WHERE id=$3 AND status='pending' RETURNING *`,
       [newStatus, String(err.message).slice(0, 500), rowId]

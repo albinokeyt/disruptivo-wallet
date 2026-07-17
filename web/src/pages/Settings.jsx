@@ -7,21 +7,33 @@ export default function Settings() {
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
+  // los textareas guardan TEXTO CRUDO (no se parte en cada tecla); se convierte a lista al guardar
+  const [ssoText, setSsoText] = useState({ company_ids: '', emails: '' })
 
-  const load = () => api.get('/api/admin/settings').then(setData).catch((e) => setError(e.message))
+  const load = () =>
+    api.get('/api/admin/settings').then((d) => {
+      setData(d)
+      setSsoText({
+        company_ids: (d.sso_admins?.company_ids || []).join('\n'),
+        emails: (d.sso_admins?.emails || []).join('\n'),
+      })
+    }).catch((e) => setError(e.message))
   useEffect(() => { load() }, [])
 
   if (error) return <Empty>{error}</Empty>
   if (!data) return <Empty>Cargando…</Empty>
 
   const setGhl = (k) => (e) => setData((d) => ({ ...d, ghl_app: { ...d.ghl_app, [k]: e.target.value } }))
+  const setSso = (k) => (e) => setSsoText((s) => ({ ...s, [k]: e.target.value }))
+  const toList = (txt) => txt.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean)
 
   const save = async (e) => {
     e.preventDefault()
     setBusy(true)
     setSaved(false)
     try {
-      await api.put('/api/admin/settings', { ghl_app: data.ghl_app, test_mode: data.test_mode })
+      const sso_admins = { company_ids: toList(ssoText.company_ids), emails: toList(ssoText.emails) }
+      await api.put('/api/admin/settings', { ghl_app: data.ghl_app, sso_admins, test_mode: data.test_mode })
       setSaved(true)
       load()
       setTimeout(() => setSaved(false), 2500)
@@ -78,6 +90,53 @@ export default function Settings() {
               URL base actual: <code className="text-ink">{data.app_base_url || '(define APP_BASE_URL en el entorno)'}</code>
             </p>
           </div>
+        </Card>
+
+        <Card>
+          <h2 className="text-sm font-semibold mb-1">Auto-login por SSO de GHL</h2>
+          <p className="text-xs text-ink2 mb-4 leading-relaxed">
+            Con esto, quien abra el panel <b>embebido dentro de GHL</b> (Custom Page) entra <b>sin contraseña</b>: GHL
+            envía su identidad cifrada y el panel la canjea por sesión. Solo entran los usuarios autorizados de abajo.
+            Genera el <b>Shared Secret</b> en tu app del marketplace (Advanced Settings → SSO) y pégalo aquí; añade una
+            <b> Custom Page</b> con la URL de abajo. Para snapshots, crea un Custom Menu Link que apunte a esa misma URL.
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Input
+              label="SSO Shared Secret"
+              type="password"
+              placeholder="(sin cambios)"
+              value={data.ghl_app.sso_secret}
+              onChange={setGhl('sso_secret')}
+            />
+            <Input
+              label="Custom Page URL (pegar en GHL)"
+              readOnly
+              value={data.custom_page_url || ''}
+              hint="La URL que GHL cargará embebida. Es la raíz del panel."
+            />
+            <label className="block lg:col-span-2">
+              <span className="block text-xs text-ink2 mb-1.5">Company IDs de agencia autorizados (uno por línea o separados por comas)</span>
+              <textarea
+                className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mut outline-none focus:border-gold/60 min-h-16"
+                value={ssoText.company_ids}
+                onChange={setSso('company_ids')}
+                placeholder="ewGlt5YqA8PHR1qJWLhC"
+              />
+              <span className="block text-[11px] text-mut mt-1">Tu Company ID de arriba entra automáticamente; aquí puedes añadir más.</span>
+            </label>
+            <label className="block lg:col-span-2">
+              <span className="block text-xs text-ink2 mb-1.5">Correos autorizados (uno por línea o separados por comas)</span>
+              <textarea
+                className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-sm text-ink placeholder-mut outline-none focus:border-gold/60 min-h-16"
+                value={ssoText.emails}
+                onChange={setSso('emails')}
+                placeholder="tu@correo.com"
+              />
+            </label>
+          </div>
+          <p className="text-[11px] text-mut mt-2">
+            Si no hay Shared Secret ni ningún autorizado, el SSO queda desactivado (nadie entra sin contraseña) — es lo seguro por defecto.
+          </p>
         </Card>
 
         <Card>

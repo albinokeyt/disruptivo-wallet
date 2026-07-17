@@ -2,9 +2,11 @@ import { q, numOr } from '../db.js'
 import { config } from '../config.js'
 import { redis } from '../redis.js'
 import { safeEqual, generateApiKey } from '../lib/crypto.js'
+import { rateLimit } from '../lib/ratelimit.js'
 import { createSession, destroySession, requireAdmin } from '../lib/session.js'
 import { getSetting, setSetting, getGhlConfig } from '../lib/settings.js'
 import { refundCharge, reconcileCharge, publicCharge } from '../lib/charges.js'
+import { decryptGhlSso, ssoAuthorized } from '../lib/sso.js'
 import * as ghl from '../lib/ghl.js'
 
 const LOGIN_MAX_FAILS = 10
@@ -32,6 +34,32 @@ export default async function adminRoutes(app) {
     }
     await redis.del(failKey)
     await createSession(req, reply)
+    return { ok: true }
+  })
+
+  // Auto-login por SSO de GHL: la app, embebida en una Custom Page, recibe el contexto de usuario
+  // CIFRADO por GHL (postMessage) y lo canjea aquí por una sesión admin. Sin contraseña, sin URL
+  // falsificable. Solo entra quien esté autorizado (agencia dueña o lista blanca).
+  app.post('/api/admin/sso', async (req, reply) => {
+    // rate-limit por IP (mitiga replay/abuso del endpoint, que crea sesión admin)
+    const rl = await rateLimit(`sso:${req.ip}`, 30, 60)
+    if (!rl.ok) return reply.code(429).send({ error: 'Demasiados intentos; espera un momento' })
+    const encrypted = req.body?.encrypted
+    if (!encrypted) return reply.code(400).send({ error: 'Falta el contexto cifrado de GHL' })
+    const cfg = await getGhlConfig()
+    if (!cfg.sso_secret) return reply.code(503).send({ error: 'SSO no configurado: falta el Shared Secret en Configuración' })
+    let identity
+    try {
+      identity = decryptGhlSso(encrypted, cfg.sso_secret)
+    } catch {
+      return reply.code(401).send({ error: 'No se pudo verificar la identidad de GHL' })
+    }
+    const admins = (await getSetting('sso_admins')) || {}
+    if (!ssoAuthorized(identity, admins, cfg)) {
+      return reply.code(403).send({ error: 'Tu usuario de GHL no está autorizado para este panel' })
+    }
+    // sesión cross-site: la cookie viaja en el iframe de GHL (SameSite=None; Secure; Partitioned)
+    await createSession(req, reply, { crossSite: true })
     return { ok: true }
   })
 
@@ -328,26 +356,6 @@ export default async function adminRoutes(app) {
     return { charges: rows.map((r) => ({ ...publicCharge(r), app_name: r.app_name, location_name: r.location_name })) }
   })
 
-  // Reconciliar manualmente un cargo ambiguo ('unknown') o 'pending' contra GHL
-  app.post('/api/admin/charges/:id/reconcile', guard, async (req, reply) => {
-    const { rows: [row] } = await q('SELECT * FROM charges WHERE id=$1', [numOr(req.params.id)])
-    if (!row) return reply.code(404).send({ error: 'Cargo no encontrado' })
-    if (!['unknown', 'pending', 'failed'].includes(row.status)) {
-      return reply.code(409).send({ error: `Solo se reconcilian cargos en estado unknown/pending/failed (actual: ${row.status})` })
-    }
-    if (!row.connection_id) return reply.code(409).send({ error: 'El cargo no tiene conexión asociada' })
-    const rec = await reconcileCharge(row)
-    if (rec.verified) return { result: 'created', charge: publicCharge(rec.verified) }
-    if (rec.unreachable) return reply.code(502).send({ error: 'No se pudo consultar GHL; reintenta en unos segundos' })
-    // GHL confirma ausente
-    const { rows: [updated] } = await q(
-      `UPDATE charges SET status='failed', error=$1, updated_at=now()
-       WHERE id=$2 AND status IN ('unknown','pending') RETURNING *`,
-      ['GHL confirma que el cargo no se registró; reintenta con el mismo event_id', row.id]
-    )
-    return { result: 'absent', charge: publicCharge(updated || row) }
-  })
-
   app.post('/api/admin/charges/:id/refund', guard, async (req, reply) => {
     const { rows: [row] } = await q('SELECT * FROM charges WHERE id=$1', [numOr(req.params.id)])
     if (!row) return reply.code(404).send({ error: 'Cargo no encontrado' })
@@ -359,9 +367,28 @@ export default async function adminRoutes(app) {
     }
   })
 
+  // Resolver manualmente un cargo 'unknown': pregunta a GHL si de verdad se cobró
+  app.post('/api/admin/charges/:id/reconcile', guard, async (req, reply) => {
+    const { rows: [row] } = await q('SELECT * FROM charges WHERE id=$1', [numOr(req.params.id)])
+    if (!row) return reply.code(404).send({ error: 'Cargo no encontrado' })
+    if (!['unknown', 'pending'].includes(row.status)) {
+      return reply.code(409).send({ error: `Solo se reconcilian cargos sin confirmar (estado actual: ${row.status})` })
+    }
+    if (!row.connection_id) return reply.code(409).send({ error: 'El cargo no tiene conexión asociada' })
+    try {
+      const rec = await reconcileCharge(row)
+      if (rec.verified) return { result: 'cobrado', charge: publicCharge(rec.verified) }
+      if (rec.absent) return { result: 'no_encontrado', message: 'GHL no reconoce este cargo. Puede seguir asentándose; reintenta más tarde o pide a la app que reintente con el mismo event_id.' }
+      return reply.code(502).send({ result: 'sin_respuesta', error: 'GHL no respondió; inténtalo de nuevo' })
+    } catch (err) {
+      return reply.code(err.statusCode || 502).send({ error: err.message })
+    }
+  })
+
   // ---------- configuración ----------
   app.get('/api/admin/settings', guard, async () => {
     const ghlApp = await getGhlConfig()
+    const admins = (await getSetting('sso_admins')) || {}
     return {
       ghl_app: {
         client_id: ghlApp.client_id || '',
@@ -369,10 +396,13 @@ export default async function adminRoutes(app) {
         app_id: ghlApp.app_id || '',
         company_id: ghlApp.company_id || '',
         pit_token: ghlApp.pit_token ? '••••••' + String(ghlApp.pit_token).slice(-4) : '',
+        sso_secret: ghlApp.sso_secret ? '••••••' + String(ghlApp.sso_secret).slice(-4) : '',
       },
+      sso_admins: { company_ids: admins.company_ids || [], emails: admins.emails || [] },
       test_mode: Boolean(await getSetting('test_mode')),
       app_base_url: config.appBaseUrl,
       redirect_uri: config.appBaseUrl ? `${config.appBaseUrl}/api/oauth/callback` : '(define APP_BASE_URL)',
+      custom_page_url: config.appBaseUrl ? `${config.appBaseUrl}/` : '(define APP_BASE_URL)',
     }
   })
 
@@ -394,6 +424,14 @@ export default async function adminRoutes(app) {
         app_id: String(inp.app_id ?? current.app_id ?? '').trim(),
         company_id: String(inp.company_id ?? current.company_id ?? '').trim(),
         pit_token: keep(inp.pit_token, current.pit_token),
+        sso_secret: keep(inp.sso_secret, current.sso_secret),
+      })
+    }
+    if (body.sso_admins && typeof body.sso_admins === 'object') {
+      const norm = (arr) => (Array.isArray(arr) ? arr.map((x) => String(x).trim()).filter(Boolean) : [])
+      await setSetting('sso_admins', {
+        company_ids: norm(body.sso_admins.company_ids),
+        emails: norm(body.sso_admins.emails).map((e) => e.toLowerCase()),
       })
     }
     if (typeof body.test_mode === 'boolean') await setSetting('test_mode', body.test_mode)

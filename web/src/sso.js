@@ -1,0 +1,47 @@
+// SSO de GHL para Custom Pages: cuando el panel se carga EMBEBIDO dentro de GHL,
+// pedimos a la ventana padre el contexto de usuario cifrado y lo canjeamos por sesión admin.
+// Si no estamos embebidos (o falla), no hacemos nada y el panel sigue su flujo normal (login).
+
+function isEmbedded() {
+  try { return window.self !== window.top } catch { return true } // cross-origin → embebidos
+}
+
+// Pide a GHL el paquete cifrado del usuario (postMessage). Resuelve el string cifrado o null.
+function requestGhlUserData(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (val) => {
+      if (done) return
+      done = true
+      window.removeEventListener('message', onMessage)
+      resolve(val || null)
+    }
+    const onMessage = (e) => {
+      const d = e.data
+      if (!d) return
+      if (typeof d === 'string' && d.length > 24) return finish(d)
+      if (d.message === 'REQUEST_USER_DATA_RESPONSE') return finish(d.payload || d.data || null)
+    }
+    window.addEventListener('message', onMessage)
+    try { window.parent.postMessage({ message: 'REQUEST_USER_DATA' }, '*') } catch { /* no embebido */ }
+    setTimeout(() => finish(null), timeoutMs)
+  })
+}
+
+// Devuelve true si dejó sesión admin iniciada por SSO. false si no aplica o falló (→ login normal).
+export async function trySsoLogin() {
+  if (!isEmbedded()) return false
+  const encrypted = await requestGhlUserData()
+  if (!encrypted) return false
+  try {
+    const res = await fetch('/api/admin/sso', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ encrypted }),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}

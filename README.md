@@ -52,6 +52,20 @@ Los cobros al wallet **exigen una app del marketplace** (un PIT no puede crear c
 
 > El wallet del cliente se recarga solo (auto-recharge nativo de GHL con su tarjeta): el cliente no gestiona ningún saldo externo. Con el rebilling de agencia activado paga el wallet de la subcuenta; sin él, el de la agencia.
 
+## Auto-login por SSO de GHL (entrar sin contraseña) + snapshot
+
+El panel puede abrirse **embebido dentro de GHL** y autenticar al usuario **automáticamente**, sin pantalla de login. GHL entrega la identidad del usuario **cifrada** (no viaja por la URL, no se puede falsificar) y el panel la canjea por sesión.
+
+**Por qué es seguro (y por qué solo por Custom Page):** este panel maneja dinero, así que el auto-login **solo** confía en el contexto cifrado que GHL envía por `postMessage` desde una **Custom Page** de la app del marketplace. Los *Custom Menu Link* pasan la identidad como parámetros de URL **falsificables**, así que **no** conceden acceso por sí solos. Además, solo entra quien esté **autorizado**; el resto ve la pantalla de login normal.
+
+**Configuración (una vez):**
+1. En tu app del marketplace → **Advanced Settings → SSO**, genera el **Shared Secret**.
+2. En el panel → **Configuración → Auto-login por SSO**: pega el Shared Secret y copia la **Custom Page URL** (es la raíz del panel).
+3. En la app del marketplace añade una **Custom Page** con esa URL.
+4. En **Configuración → Auto-login por SSO** define quién entra: tu **Company ID de agencia** (el de arriba entra solo) y/o una **lista de correos**. Si no configuras nada, el SSO queda **desactivado** (fail-closed).
+
+**Meterlo en un snapshot:** en una subcuenta crea un **Custom Menu Link** que apunte a la Custom Page URL e inclúyelo en tu snapshot; al cargar el snapshot en otras subcuentas, el acceso aparece solo. El menu link es solo el atajo para abrir el panel — el **auto-login seguro ocurre por la Custom Page** (identidad cifrada), no por el menu link. *(GHL no permite empujar la Custom Page de una app vía API de snapshots a subcuentas existentes; el snapshot solo transporta el menu link, y la Custom Page llega al instalar la app.)*
+
 ## API para tus apps
 
 Autenticación: header `Authorization: Bearer dw_…` (o `X-Api-Key`). Las claves se crean en el panel → **Apps** y solo se muestran una vez.
@@ -80,7 +94,7 @@ curl -X POST https://wallet.tudominio.com/api/v1/charges \
 
 Estados del cargo: `pending` (en vuelo) · `created` (cobrado) · `test` · `failed` (GHL lo rechazó, reintentable) · `unknown` (sin confirmación, se reconcilia al reintentar) · `refunded`.
 
-**Reconciliación automática:** un proceso en segundo plano (cada 60 s) resuelve solo los cargos que quedan `unknown` (>3 min) o `pending` huérfanos (>10 min): consulta en GHL si el `eventId` se cobró y los promueve a `created`, o los marca `failed` si GHL confirma que no. Con varias réplicas solo una barre por ciclo (lock en Redis). También puedes reconciliar a mano desde el panel → Cobros → «Reconciliar».
+**Reconciliación automática:** un proceso en segundo plano (cada 60 s) sana los cargos que quedan `unknown` (>3 min) o `pending` huérfanos (>10 min): consulta en GHL si el `eventId` se cobró y, **solo si lo confirma**, los promueve a `created`. Regla de oro anti-doble-cobro: el reconciliador **nunca** marca `failed` por una ausencia en GHL (la lista de GHL no es autoritativa por consistencia eventual); un cargo que sigue sin confirmarse se deja `unknown` para que lo resuelva el reintento del consumidor o el admin. Con varias réplicas solo una barre por ciclo (lock en Redis con dueño único). También puedes reconciliar a mano desde el panel → Cobros → «Reconciliar».
 
 **Límite de peticiones:** la API pública limita a `API_RATE_PER_MIN` (def. 600) peticiones/min por API key; devuelve `429` y la cabecera `X-RateLimit-Remaining`.
 
@@ -113,7 +127,8 @@ npm test               # tests unitarios (funciones puras, sin BD)
 - Las API keys se guardan hasheadas (SHA-256); solo se muestran al crearlas.
 - **Alcance por app**: cada API key puede limitarse a ciertas subcuentas (panel → Apps → «Subcuentas»). Por defecto puede cobrar a todas.
 - El OAuth usa `state` anti-CSRF cuando se inicia desde el panel. Para permitir que un cliente instale la app directamente desde GHL (sin pasar por el panel), configura el **Company ID** de tu agencia en Configuración — instalaciones de otras agencias se rechazan.
-- Login del panel con límite de intentos (10 fallos / 15 min por IP).
+- Login del panel con límite de intentos (10 fallos / 15 min por IP). El endpoint SSO también va con rate-limit.
+- **Auto-login SSO**: solo concede admin a **admins a nivel agencia** (`type=agency`, `role=admin`) de tu agencia o a los **correos** que autorices; nunca a usuarios de subcuenta. Fail-closed si no hay Shared Secret ni autorizados. La sesión SSO usa cookie `SameSite=None; Secure; Partitioned` (necesaria para el iframe de GHL). Riesgo residual conocido: replay de un blob cifrado filtrado (mitigado con rate-limit; requeriría además XSS/MITM del navegador de la víctima) — aceptado, igual que en Hermes.
 - Los tokens OAuth de GHL se guardan en Postgres — mantén el repo y la base privados.
 - El refresh de tokens es de un solo uso: está serializado con lock en Redis y con timeouts acotados.
 - Cobros en USD (única moneda soportada por la Wallet Charges API).

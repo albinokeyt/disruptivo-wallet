@@ -5,15 +5,18 @@ import { config } from '../config.js'
 const COOKIE = 'dw_session'
 const TTL = 60 * 60 * 24 * 7
 
-export async function createSession(req, reply) {
+// crossSite=true para sesiones creadas dentro del iframe de GHL (SSO): el navegador solo envía la
+// cookie en un iframe de terceros si es SameSite=None; Secure (+ Partitioned/CHIPS). Login directo → Lax.
+export async function createSession(req, reply, { crossSite = false } = {}) {
   const token = randomBytes(32).toString('hex')
   await redis.set(`sess:${token}`, '1', 'EX', TTL)
   reply.setCookie(COOKIE, token, {
     path: '/',
     httpOnly: true,
-    sameSite: 'lax',
-    // transporte real (trustProxy resuelve X-Forwarded-Proto), con APP_BASE_URL como respaldo
-    secure: req?.protocol === 'https' || config.appBaseUrl.startsWith('https'),
+    sameSite: crossSite ? 'none' : 'lax',
+    // SameSite=None EXIGE Secure; en directo, transporte real (trustProxy) con APP_BASE_URL de respaldo
+    secure: crossSite || req?.protocol === 'https' || config.appBaseUrl.startsWith('https'),
+    partitioned: crossSite || undefined, // CHIPS: cookie particionada para el bloqueo de 3rd-party
     maxAge: TTL,
   })
 }

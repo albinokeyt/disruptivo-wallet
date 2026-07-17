@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import { api, fmtUsd, fmtDate } from '../api.js'
+import { useCountUp } from '../hooks.js'
 import { Card, Badge, Th, Td, Empty } from '../components/ui.jsx'
 
-// barra dorada validada contra la superficie oscura (#ab8526 sobre #181b23)
+// barra dorada validada con la skill dataviz contra la superficie negra (#ab8526 sobre #0a0a0c)
 const BAR = '#ab8526'
+
+// importe que sube contando al cargar
+const Money = ({ n }) => fmtUsd(useCountUp(n))
 
 function BarChart({ series }) {
   const [hover, setHover] = useState(null)
@@ -39,6 +43,8 @@ function BarChart({ series }) {
             <g key={d.day}>
               {h > 0 && (
                 <path
+                  className="bar"
+                  style={{ animationDelay: `${i * 35}ms` }}
                   d={`M ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} H ${x + w - r} Q ${x + w} ${y} ${x + w} ${y + r} V ${PAD.top + ih} H ${x} Z`}
                   fill={BAR}
                   opacity={hover === null || hover === i ? 1 : 0.45}
@@ -82,9 +88,9 @@ function BarChart({ series }) {
 }
 
 const Stat = ({ label, value, sub }) => (
-  <Card>
+  <Card className="lift">
     <div className="text-xs text-mut">{label}</div>
-    <div className="text-2xl font-bold mt-1.5 tabular-nums">{value}</div>
+    <div className="text-2xl font-bold mt-1.5 tabular-nums text-gradient-gold">{value}</div>
     {sub && <div className="text-[11px] text-ink2 mt-1">{sub}</div>}
   </Card>
 )
@@ -108,12 +114,12 @@ export default function Dashboard() {
       <h1 className="text-xl font-bold">Dashboard</h1>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Facturado hoy" value={fmtUsd(data.totals.today)} />
-        <Stat label="Últimos 7 días" value={fmtUsd(data.totals.last7)} />
-        <Stat label="Últimos 30 días" value={fmtUsd(data.totals.last30)} />
+        <Stat label="Facturado hoy" value={<Money n={data.totals.today} />} />
+        <Stat label="Últimos 7 días" value={<Money n={data.totals.last7} />} />
+        <Stat label="Últimos 30 días" value={<Money n={data.totals.last30} />} />
         <Stat
           label="Total histórico"
-          value={fmtUsd(data.totals.all_time)}
+          value={<Money n={data.totals.all_time} />}
           sub={`${data.counts.apps} apps · ${data.counts.connections} conexiones · ${data.counts.meters} tarifas${unknown ? ` · ${unknown} sin confirmar` : ''}${failed ? ` · ${failed} fallidos` : ''}`}
         />
       </div>

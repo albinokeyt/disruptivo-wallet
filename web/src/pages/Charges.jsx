@@ -43,7 +43,9 @@ export default function Charges() {
   const reconcile = async (c) => {
     try {
       const d = await api.post(`/api/admin/charges/${c.id}/reconcile`)
-      alert(d.result === 'created' ? 'GHL confirma el cobro: marcado como cobrado.' : 'GHL confirma que no se cobró: marcado como fallido (reintentable).')
+      alert(d.result === 'cobrado'
+        ? 'GHL confirma el cobro: marcado como cobrado.'
+        : (d.message || 'GHL no reconoce el cargo todavía; reintenta más tarde.'))
       load(offset)
     } catch (e) {
       alert(e.message)
