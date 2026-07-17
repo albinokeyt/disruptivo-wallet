@@ -1,0 +1,47 @@
+# Autohospedaje / desarrollo local. En EasyPanel se definen los 3 servicios por separado.
+# Copia .env.example a .env y ajusta ADMIN_PASS / APP_BASE_URL antes de levantar.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: disruptivo_wallet
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d disruptivo_wallet"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/disruptivo_wallet
+      REDIS_URL: redis://redis:6379
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASS: ${ADMIN_PASS:?define ADMIN_PASS en .env}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+volumes:
+  dbdata:
+  redisdata:

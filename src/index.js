@@ -5,8 +5,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { config } from './config.js'
-import { migrate, pool } from './db.js'
+import { migrate, pool, q } from './db.js'
 import { redis } from './redis.js'
+import { startReconciler, stopReconciler } from './lib/reconciler.js'
 import oauthRoutes from './routes/oauth.js'
 import publicApiRoutes from './routes/publicApi.js'
 import adminRoutes from './routes/admin.js'
@@ -14,6 +15,15 @@ import adminRoutes from './routes/admin.js'
 const app = Fastify({ logger: true, trustProxy: true })
 
 await app.register(fastifyCookie)
+
+// salud para EasyPanel / Docker (público, sin auth)
+app.get('/healthz', async (req, reply) => {
+  const health = { ok: true, db: false, redis: false }
+  try { await q('SELECT 1'); health.db = true } catch { health.ok = false }
+  try { await redis.ping(); health.redis = true } catch { health.ok = false }
+  return reply.code(health.ok ? 200 : 503).send(health)
+})
+
 await app.register(oauthRoutes)
 await app.register(adminRoutes)
 await app.register(publicApiRoutes, { prefix: '' })
@@ -45,6 +55,7 @@ const shutdown = async (signal) => {
   shuttingDown = true
   app.log.info({ signal }, 'cerrando ordenadamente')
   try {
+    stopReconciler()
     await app.close() // drena las peticiones en vuelo (cargos incluidos)
     await pool.end()
     await redis.quit()
@@ -62,7 +73,11 @@ try {
   await redis.ping().catch((err) => {
     throw new Error(`No se pudo conectar a Redis (${config.redisUrl}): ${err.message}`)
   })
+  if (!config.adminPass) {
+    app.log.warn('ADMIN_PASS no está definido: el login del panel está deshabilitado hasta configurarlo')
+  }
   await app.listen({ port: config.port, host: '0.0.0.0' })
+  startReconciler(app.log)
 } catch (err) {
   app.log.error(err)
   process.exit(1)

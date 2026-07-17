@@ -114,12 +114,13 @@ export async function reconcileCharge(row) {
   const hit = Array.isArray(list) ? list.find((c) => c && c.transactionType !== 'refund') : null
   if (!hit) return { absent: true }
   const ghlId = hit.chargeId || hit._id || hit.id || null
+  // nunca pisar un estado final (p. ej. 'refunded'); solo promocionar estados no confirmados
   const { rows: [updated] } = await q(
     `UPDATE charges SET status='created', ghl_charge_id=COALESCE($1, ghl_charge_id), error=NULL, updated_at=now()
-     WHERE id=$2 RETURNING *`,
+     WHERE id=$2 AND status IN ('pending','unknown','failed') RETURNING *`,
     [ghlId, row.id]
   )
-  return { verified: updated }
+  return updated ? { verified: updated } : { verified: row }
 }
 
 // Ejecuta el cargo contra GHL sobre una fila ya reservada en estado pending. Devuelve la fila actualizada.

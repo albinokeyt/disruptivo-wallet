@@ -31,6 +31,11 @@ Node 22 + Fastify + Postgres + Redis, panel React (Vite + Tailwind v4). Un solo 
 | `APP_BASE_URL` | URL pública, p. ej. `https://wallet.escaladoacelerado.es` |
 
 3. Apunta el dominio al puerto 8080. Las migraciones corren solas al arrancar.
+4. Health check para EasyPanel/Docker: `GET /healthz` (verifica Postgres + Redis; 200 si todo OK, 503 si no). El Dockerfile ya trae su `HEALTHCHECK`.
+
+### Autohospedaje / local con Docker Compose
+
+Como alternativa a los 3 servicios de EasyPanel: copia `.env.example` a `.env`, define `ADMIN_PASS` y `POSTGRES_PASSWORD`, y `docker compose up -d` — levanta Postgres, Redis y la app juntos.
 
 ## Configurar la app del marketplace de GHL
 
@@ -75,6 +80,10 @@ curl -X POST https://wallet.tudominio.com/api/v1/charges \
 
 Estados del cargo: `pending` (en vuelo) · `created` (cobrado) · `test` · `failed` (GHL lo rechazó, reintentable) · `unknown` (sin confirmación, se reconcilia al reintentar) · `refunded`.
 
+**Reconciliación automática:** un proceso en segundo plano (cada 60 s) resuelve solo los cargos que quedan `unknown` (>3 min) o `pending` huérfanos (>10 min): consulta en GHL si el `eventId` se cobró y los promueve a `created`, o los marca `failed` si GHL confirma que no. Con varias réplicas solo una barre por ciclo (lock en Redis). También puedes reconciliar a mano desde el panel → Cobros → «Reconciliar».
+
+**Límite de peticiones:** la API pública limita a `API_RATE_PER_MIN` (def. 600) peticiones/min por API key; devuelve `429` y la cabecera `X-RateLimit-Remaining`.
+
 ### Resto de endpoints
 
 | Método | Ruta | Qué hace |
@@ -96,6 +105,7 @@ npm install && cd web && npm install && cd ..
 # necesita un Postgres y un Redis (ajusta DATABASE_URL/REDIS_URL)
 npm run dev            # API en :8080
 cd web && npm run dev  # panel en :5173 con proxy a /api
+npm test               # tests unitarios (funciones puras, sin BD)
 ```
 
 ## Notas de seguridad

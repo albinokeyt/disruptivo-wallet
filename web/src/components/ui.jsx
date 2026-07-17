@@ -66,6 +66,7 @@ const STATUS = {
   created: { label: 'Cobrado', cls: 'bg-ok/10 text-ok border-ok/30' },
   test: { label: 'Prueba', cls: 'bg-gold/10 text-gold border-gold/30' },
   pending: { label: 'En curso', cls: 'bg-warn/10 text-warn border-warn/30' },
+  unknown: { label: 'Sin confirmar', cls: 'bg-warn/10 text-warn border-warn/40' },
   failed: { label: 'Fallido', cls: 'bg-bad/10 text-bad border-bad/30' },
   refunded: { label: 'Reembolsado', cls: 'bg-mut/10 text-ink2 border-border' },
   active: { label: 'Activa', cls: 'bg-ok/10 text-ok border-ok/30' },

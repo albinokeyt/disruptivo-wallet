@@ -1,7 +1,10 @@
 import { q, numOr } from '../db.js'
 import { hashKey } from '../lib/crypto.js'
+import { rateLimit } from '../lib/ratelimit.js'
 import { resolveChargeInput, executeCharge, reconcileCharge, refundCharge, publicCharge } from '../lib/charges.js'
 import * as ghl from '../lib/ghl.js'
+
+const RATE_PER_MIN = numOr(process.env.API_RATE_PER_MIN, 600) ?? 600
 
 async function authApp(req, reply) {
   const header = req.headers.authorization || ''
@@ -12,6 +15,9 @@ async function authApp(req, reply) {
     return reply.code(401).send({ error: 'API key inválida o revocada' })
   }
   req.consumerApp = appRow
+  const rl = await rateLimit(`app:${appRow.id}`, RATE_PER_MIN, 60)
+  reply.header('X-RateLimit-Remaining', rl.remaining)
+  if (!rl.ok) return reply.code(429).send({ error: `Límite de ${RATE_PER_MIN} peticiones/min superado` })
 }
 
 // una app solo ve las subcuentas a las que puede cobrar (NULL = todas)

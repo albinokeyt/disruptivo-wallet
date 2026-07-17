@@ -101,6 +101,7 @@ export default function Dashboard() {
   if (!data) return <Empty>Cargando…</Empty>
 
   const failed = data.by_status.find((s) => s.status === 'failed')?.n || 0
+  const unknown = data.by_status.find((s) => s.status === 'unknown')?.n || 0
 
   return (
     <div className="space-y-6">
@@ -113,7 +114,7 @@ export default function Dashboard() {
         <Stat
           label="Total histórico"
           value={fmtUsd(data.totals.all_time)}
-          sub={`${data.counts.apps} apps · ${data.counts.connections} conexiones · ${data.counts.meters} tarifas${failed ? ` · ${failed} fallidos` : ''}`}
+          sub={`${data.counts.apps} apps · ${data.counts.connections} conexiones · ${data.counts.meters} tarifas${unknown ? ` · ${unknown} sin confirmar` : ''}${failed ? ` · ${failed} fallidos` : ''}`}
         />
       </div>
 

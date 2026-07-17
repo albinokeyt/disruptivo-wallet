@@ -40,6 +40,16 @@ export default function Charges() {
     load(offset)
   }
 
+  const reconcile = async (c) => {
+    try {
+      const d = await api.post(`/api/admin/charges/${c.id}/reconcile`)
+      alert(d.result === 'created' ? 'GHL confirma el cobro: marcado como cobrado.' : 'GHL confirma que no se cobró: marcado como fallido (reintentable).')
+      load(offset)
+    } catch (e) {
+      alert(e.message)
+    }
+  }
+
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }))
 
   return (
@@ -57,6 +67,7 @@ export default function Charges() {
             <option value="created">Cobrado</option>
             <option value="test">Prueba</option>
             <option value="pending">En curso</option>
+            <option value="unknown">Sin confirmar</option>
             <option value="failed">Fallido</option>
             <option value="refunded">Reembolsado</option>
           </Select>
@@ -99,7 +110,10 @@ export default function Charges() {
                   <Td className="text-right tabular-nums">{fmtUsd(c.amount)}</Td>
                   <Td><Badge status={c.status} /></Td>
                   <Td className="text-ink2 whitespace-nowrap">{fmtDate(c.created_at)}</Td>
-                  <Td className="text-right">
+                  <Td className="text-right whitespace-nowrap">
+                    {(c.status === 'unknown' || c.status === 'pending') && (
+                      <button className="text-xs text-warn/90 hover:text-warn mr-3" onClick={() => reconcile(c)}>Reconciliar</button>
+                    )}
                     {(c.status === 'created' || c.status === 'test') && (
                       <button className="text-xs text-bad/80 hover:text-bad" onClick={() => refund(c)}>Reembolsar</button>
                     )}

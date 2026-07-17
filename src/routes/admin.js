@@ -4,7 +4,7 @@ import { redis } from '../redis.js'
 import { safeEqual, generateApiKey } from '../lib/crypto.js'
 import { createSession, destroySession, requireAdmin } from '../lib/session.js'
 import { getSetting, setSetting, getGhlConfig } from '../lib/settings.js'
-import { refundCharge, publicCharge } from '../lib/charges.js'
+import { refundCharge, reconcileCharge, publicCharge } from '../lib/charges.js'
 import * as ghl from '../lib/ghl.js'
 
 const LOGIN_MAX_FAILS = 10
@@ -326,6 +326,26 @@ export default async function adminRoutes(app) {
       params
     )
     return { charges: rows.map((r) => ({ ...publicCharge(r), app_name: r.app_name, location_name: r.location_name })) }
+  })
+
+  // Reconciliar manualmente un cargo ambiguo ('unknown') o 'pending' contra GHL
+  app.post('/api/admin/charges/:id/reconcile', guard, async (req, reply) => {
+    const { rows: [row] } = await q('SELECT * FROM charges WHERE id=$1', [numOr(req.params.id)])
+    if (!row) return reply.code(404).send({ error: 'Cargo no encontrado' })
+    if (!['unknown', 'pending', 'failed'].includes(row.status)) {
+      return reply.code(409).send({ error: `Solo se reconcilian cargos en estado unknown/pending/failed (actual: ${row.status})` })
+    }
+    if (!row.connection_id) return reply.code(409).send({ error: 'El cargo no tiene conexión asociada' })
+    const rec = await reconcileCharge(row)
+    if (rec.verified) return { result: 'created', charge: publicCharge(rec.verified) }
+    if (rec.unreachable) return reply.code(502).send({ error: 'No se pudo consultar GHL; reintenta en unos segundos' })
+    // GHL confirma ausente
+    const { rows: [updated] } = await q(
+      `UPDATE charges SET status='failed', error=$1, updated_at=now()
+       WHERE id=$2 AND status IN ('unknown','pending') RETURNING *`,
+      ['GHL confirma que el cargo no se registró; reintenta con el mismo event_id', row.id]
+    )
+    return { result: 'absent', charge: publicCharge(updated || row) }
   })
 
   app.post('/api/admin/charges/:id/refund', guard, async (req, reply) => {
