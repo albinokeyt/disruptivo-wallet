@@ -2,6 +2,7 @@ import { q, numOr } from '../db.js'
 import { hashKey } from '../lib/crypto.js'
 import { rateLimit } from '../lib/ratelimit.js'
 import { resolveChargeInput, executeCharge, reconcileCharge, refundCharge, publicCharge } from '../lib/charges.js'
+import { checkAccess } from '../lib/access.js'
 import * as ghl from '../lib/ghl.js'
 
 const RATE_PER_MIN = numOr(process.env.API_RATE_PER_MIN, 600) ?? 600
@@ -195,5 +196,14 @@ export default async function publicApiRoutes(app) {
        FROM connections ORDER BY created_at DESC`
     )
     return { locations: rows.filter((r) => locationAllowed(req.consumerApp, r.location_id)) }
+  })
+
+  // ¿Esta subcuenta tiene acceso/suscripción vigente a MI app? (la app se identifica por su API key)
+  app.get('/api/v1/access/:locationId', async (req, reply) => {
+    const locationId = req.params.locationId
+    if (!locationAllowed(req.consumerApp, locationId)) {
+      return reply.code(403).send({ error: 'Esta API key no está autorizada para esa subcuenta' })
+    }
+    return checkAccess(req.consumerApp.id, locationId)
   })
 }

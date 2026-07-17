@@ -1,14 +1,24 @@
-# Disruptivo Wallet
+# Marketplace Disruptivo
 
-Pasarela central de cobros del **Departamento Disruptivo**: una sola app que habla con la **Wallet Charges API** del marketplace de GoHighLevel y expone su propia API para que tus otras apps (Hermes Setter, herramientas futuras…) cobren del **wallet nativo de GHL** de cada subcuenta — sin pasarelas externas ni saldos aparte.
+El centro de apps del **Departamento Disruptivo**: **tienda pública** de tus apps para GoHighLevel (con fotos/vídeos, reseñas, precios y link de instalación) + **wallet** que las cobra del saldo nativo de GHL + **gestión de accesos y suscripciones** (das acceso por meses aunque paguen por fuera, cortas si no pagan, planes con prueba gratis) + **avisos**. Todo centralizado, y por API tus apps se conectan aquí para consumir el wallet y preguntar si una subcuenta tiene acceso.
 
 ```
-Tus apps (Hermes, …)  ──API key──▶  Disruptivo Wallet  ──OAuth──▶  Wallet de GHL (subcuenta)
-                                        │
-                                        └─ ledger local: apps, tarifas, cobros, reembolsos
+                         ┌───────────────── Marketplace Disruptivo ─────────────────┐
+  Visitante ──▶ Tienda pública (/tienda)                                            │
+  Tus apps  ──API key──▶  /api/v1/charges  (cobra del wallet)                        │
+            └─────────▶  /api/v1/access    (¿esta subcuenta tiene acceso?)           │
+                         Admin: apps+vitrina, planes, suscripciones, cobros, avisos  │
+                         └─ OAuth ──▶ Wallet de GHL (subcuenta) · ledger local ──────┘
 ```
 
 **Cómo llega el dinero:** GHL descuenta del wallet del cliente y liquida al developer vía **Tipalti el día 15 de cada mes** (comisión 0% hasta el 31/12/2026). Esta app centraliza y contabiliza; GHL cobra y te paga.
+
+## Módulos
+- **Tienda** (`/tienda`, pública): vitrina de apps con media, estrellas/reseñas, precio y botón «Instalar en GoHighLevel».
+- **Wallet**: cobra del wallet de GHL por uso (meters), reconciliación, reembolsos. (ver «API para tus apps»)
+- **Accesos y suscripciones**: da acceso de una subcuenta a una app o plan, por meses o indefinido, de pago/prueba/cortesía. Tus apps preguntan con `GET /api/v1/access/<locationId>`.
+- **Planes**: bundles de apps con días de prueba y duración.
+- **Avisos**: comunicados internos y banners en la tienda.
 
 ## Stack
 
@@ -107,6 +117,9 @@ Estados del cargo: `pending` (en vuelo) · `created` (cobrado) · `test` · `fai
 | `DELETE` | `/api/v1/charges/:id` | Reembolso (borra el cargo en GHL) |
 | `GET` | `/api/v1/meters` | Tarifas activas |
 | `GET` | `/api/v1/locations` | Subcuentas conectadas |
+| `GET` | `/api/v1/access/:locationId` | ¿La subcuenta tiene acceso/suscripción vigente a **tu** app? Devuelve `{access, via, plan, status, ends_at}` |
+
+**Control de acceso (SaaS):** tu app pregunta `GET /api/v1/access/<locationId>` al arrancar/atender y actúa según `access`. Los accesos se conceden desde el panel → **Suscripciones** (por meses, indefinido, prueba o cortesía) o vía **Planes**. Así puedes vender por suscripción, dar prueba gratis, o cortar el acceso si no pagan — sin tocar el código de la app.
 
 ### Modo prueba
 

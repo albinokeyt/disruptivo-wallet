@@ -11,6 +11,7 @@ import { startReconciler, stopReconciler } from './lib/reconciler.js'
 import oauthRoutes from './routes/oauth.js'
 import publicApiRoutes from './routes/publicApi.js'
 import adminRoutes from './routes/admin.js'
+import marketplaceRoutes from './routes/marketplace.js'
 
 const app = Fastify({ logger: true, trustProxy: true })
 
@@ -26,6 +27,7 @@ app.get('/healthz', async (req, reply) => {
 
 await app.register(oauthRoutes)
 await app.register(adminRoutes)
+await app.register(marketplaceRoutes)
 await app.register(publicApiRoutes, { prefix: '' })
 
 // panel React compilado (web/dist)

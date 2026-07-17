@@ -1,7 +1,113 @@
 import { useEffect, useState } from 'react'
-import { Plus, KeyRound, Copy, Check, MapPin } from 'lucide-react'
+import { Plus, KeyRound, Copy, Check, MapPin, Store, Trash2, Star } from 'lucide-react'
 import { api, fmtUsd, fmtDate } from '../api.js'
-import { Card, Button, Input, Badge, Modal, Th, Td, Empty, Toggle } from '../components/ui.jsx'
+import { Card, Button, Input, Select, Badge, Modal, Th, Td, Empty, Toggle } from '../components/ui.jsx'
+
+function ListingModal({ app, onClose, onSaved }) {
+  const [f, setF] = useState({
+    tagline: app.tagline || '', price_text: app.price_text || '', install_url: app.install_url || '',
+    description: app.description || '', slug: app.slug || '',
+    media: Array.isArray(app.media) ? app.media : [], visible: Boolean(app.visible),
+    featuresText: (Array.isArray(app.features) ? app.features : []).join('\n'),
+  })
+  const [reviews, setReviews] = useState([])
+  const [nr, setNr] = useState({ author: '', rating: 5, text: '' })
+  const [busy, setBusy] = useState(false)
+
+  const loadReviews = () => api.get(`/api/admin/apps/${app.id}/reviews`).then((d) => setReviews(d.reviews)).catch(() => {})
+  useEffect(() => { loadReviews() }, [])
+
+  const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
+  const setMedia = (i, k, v) => setF((s) => ({ ...s, media: s.media.map((m, j) => j === i ? { ...m, [k]: v } : m) }))
+  const addMedia = () => setF((s) => ({ ...s, media: [...s.media, { type: 'image', url: '', caption: '' }] }))
+  const rmMedia = (i) => setF((s) => ({ ...s, media: s.media.filter((_, j) => j !== i) }))
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      await api.patch(`/api/admin/apps/${app.id}/listing`, {
+        tagline: f.tagline, price_text: f.price_text, install_url: f.install_url, description: f.description,
+        slug: f.slug || undefined, visible: f.visible,
+        media: f.media.filter((m) => m.url?.trim()),
+        features: f.featuresText.split('\n').map((x) => x.trim()).filter(Boolean),
+      })
+      onSaved(); onClose()
+    } catch (err) { alert(err.message) } finally { setBusy(false) }
+  }
+
+  const addReview = async () => {
+    if (!nr.author.trim()) return
+    await api.post(`/api/admin/apps/${app.id}/reviews`, { ...nr, rating: Number(nr.rating) }).catch((e) => alert(e.message))
+    setNr({ author: '', rating: 5, text: '' }); loadReviews()
+  }
+  const delReview = async (id) => { await api.del(`/api/admin/reviews/${id}`).catch(() => {}); loadReviews() }
+
+  return (
+    <Modal title={`Vitrina de "${app.name}"`} onClose={onClose}>
+      <div className="space-y-4">
+        <Toggle checked={f.visible} onChange={(v) => setF((s) => ({ ...s, visible: v }))} label="Publicada en la tienda" />
+        <Input label="Gancho (una línea)" value={f.tagline} onChange={set('tagline')} placeholder="El setter IA que suena humano" />
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Precio (texto)" value={f.price_text} onChange={set('price_text')} placeholder="desde 0,015€/mensaje" />
+          <Input label="Slug (URL)" value={f.slug} onChange={set('slug')} placeholder="hermes-setter" />
+        </div>
+        <Input label="Link de instalación en GHL" value={f.install_url} onChange={set('install_url')} placeholder="https://marketplace.gohighlevel.com/..." />
+        <label className="block">
+          <span className="block text-xs text-ink2 mb-1.5">Descripción</span>
+          <textarea className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-sm text-ink outline-none focus:border-gold/60 min-h-24" value={f.description} onChange={set('description')} />
+        </label>
+        <label className="block">
+          <span className="block text-xs text-ink2 mb-1.5">Características (una por línea)</span>
+          <textarea className="w-full bg-bg border border-border rounded-xl px-3.5 py-2.5 text-sm text-ink outline-none focus:border-gold/60 min-h-20" value={f.featuresText} onChange={set('featuresText')} placeholder={'Responde por IG y WhatsApp\nAgenda citas solo'} />
+        </label>
+
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-ink2">Fotos y vídeos</span>
+            <button className="text-xs text-gold" onClick={addMedia}><Plus size={12} className="inline" /> añadir</button>
+          </div>
+          <div className="space-y-2">
+            {f.media.map((m, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <select className="bg-bg border border-border rounded-lg px-2 py-2 text-xs" value={m.type} onChange={(e) => setMedia(i, 'type', e.target.value)}>
+                  <option value="image">Imagen</option><option value="video">Vídeo</option>
+                </select>
+                <input className="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-xs" placeholder="URL (imagen, mp4 o YouTube)" value={m.url} onChange={(e) => setMedia(i, 'url', e.target.value)} />
+                <button className="text-mut hover:text-bad" onClick={() => rmMedia(i)}><Trash2 size={14} /></button>
+              </div>
+            ))}
+            {f.media.length === 0 && <p className="text-[11px] text-mut">Sin multimedia. La primera imagen es la portada en la tienda.</p>}
+          </div>
+        </div>
+
+        <Button className="w-full" disabled={busy} onClick={save}>Guardar vitrina</Button>
+
+        <div className="pt-4 border-t border-border">
+          <h3 className="text-sm font-semibold mb-2">Reseñas ({reviews.length})</h3>
+          <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
+            {reviews.map((r) => (
+              <div key={r.id} className="flex items-start justify-between gap-2 text-xs bg-bg border border-border rounded-lg px-3 py-2">
+                <div>
+                  <span className="font-medium">{r.author}</span> <span className="text-gold">{'★'.repeat(r.rating)}</span>
+                  {r.text && <div className="text-ink2 mt-0.5">{r.text}</div>}
+                </div>
+                <button className="text-mut hover:text-bad shrink-0" onClick={() => delReview(r.id)}><Trash2 size={13} /></button>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <input className="bg-bg border border-border rounded-lg px-3 py-2 text-xs" placeholder="Autor" value={nr.author} onChange={(e) => setNr((s) => ({ ...s, author: e.target.value }))} />
+            <select className="bg-bg border border-border rounded-lg px-2 py-2 text-xs" value={nr.rating} onChange={(e) => setNr((s) => ({ ...s, rating: e.target.value }))}>
+              {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{n} ★</option>)}
+            </select>
+          </div>
+          <input className="w-full bg-bg border border-border rounded-lg px-3 py-2 text-xs mt-2" placeholder="Texto de la reseña" value={nr.text} onChange={(e) => setNr((s) => ({ ...s, text: e.target.value }))} />
+          <Button variant="ghost" className="w-full mt-2" onClick={addReview} disabled={!nr.author.trim()}>Añadir reseña</Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
 
 function ScopeModal({ app, onClose, onSaved }) {
   const [conns, setConns] = useState(null)
@@ -96,6 +202,7 @@ export default function Apps() {
   const [newName, setNewName] = useState('')
   const [reveal, setReveal] = useState(null) // { apiKey, appName }
   const [scoping, setScoping] = useState(null) // app en edición de alcance
+  const [listing, setListing] = useState(null) // app en edición de vitrina
   const [busy, setBusy] = useState(false)
 
   const load = () => api.get('/api/admin/apps').then((d) => setApps(d.apps)).catch((e) => setError(e.message))
@@ -138,7 +245,7 @@ export default function Apps() {
         <Button onClick={() => setShowNew(true)}><Plus size={15} className="inline -mt-0.5 mr-1" />Nueva app</Button>
       </div>
       <p className="text-sm text-ink2 -mt-3">
-        Cada app (Hermes, tus próximas herramientas…) recibe una API key y cobra a través de esta pasarela.
+        Cada app recibe su API key (para cobrar del wallet y preguntar accesos) y su <b>vitrina</b> en la tienda pública.
       </p>
 
       {error && <Empty>{error}</Empty>}
@@ -170,6 +277,13 @@ export default function Apps() {
                   <Td><Toggle checked={a.test_mode} onChange={(v) => patch(a, { test_mode: v })} /></Td>
                   <Td><Badge status={a.status} /></Td>
                   <Td className="text-right whitespace-nowrap">
+                    <button
+                      className={`text-xs mr-3 ${a.visible ? 'text-gold' : 'text-ink2 hover:text-gold'}`}
+                      title="Vitrina en la tienda"
+                      onClick={() => setListing(a)}
+                    >
+                      <Store size={14} className="inline -mt-0.5" /> {a.visible ? 'Publicada' : 'Vitrina'}
+                    </button>
                     <button
                       className="text-xs text-ink2 hover:text-gold mr-3"
                       title="Subcuentas a las que puede cobrar"
@@ -218,6 +332,7 @@ export default function Apps() {
       )}
       {reveal && <KeyReveal apiKey={reveal.apiKey} appName={reveal.appName} onClose={() => setReveal(null)} />}
       {scoping && <ScopeModal app={scoping} onClose={() => setScoping(null)} onSaved={load} />}
+      {listing && <ListingModal app={listing} onClose={() => setListing(null)} onSaved={load} />}
     </div>
   )
 }
